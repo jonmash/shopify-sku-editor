@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Linda's Natural Remedies — SKU / Barcode Editor</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          moss: { 50:'#f4f6f2', 100:'#e6ebe0', 200:'#c9d4bd', 400:'#6f8f5e', 600:'#3f6b4a', 700:'#2e5038' },
+          cream: '#f7f6f2'
+        }
+      }
+    }
+  }
+</script>
+</head>
+<body class="bg-cream text-stone-800 font-sans min-h-screen p-6">
+
+<div class="max-w-6xl mx-auto">
+  <h1 class="text-xl font-semibold text-stone-900">SKU / Barcode Editor</h1>
+  <p class="text-sm text-stone-500 mb-6">Linda's Natural Remedies — bulk edit variant SKUs and barcodes without Matrixify.</p>
+
+  <!-- SETUP PANEL -->
+  <div id="setupPanel" class="bg-white border border-stone-200 rounded-xl p-5 shadow-sm mb-6">
+    <div class="grid sm:grid-cols-2 gap-4">
+      <div>
+        <label class="block text-xs font-medium text-stone-500 mb-1">Shop domain</label>
+        <input id="shopDomain" type="text" placeholder="lindasnaturalremedies.myshopify.com"
+          class="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-moss-400">
+      </div>
+      <div>
+        <label class="block text-xs font-medium text-stone-500 mb-1">Admin API access token</label>
+        <input id="accessToken" type="password" placeholder="shpat_..."
+          class="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-moss-400">
+      </div>
+    </div>
+
+    <div class="flex flex-wrap items-end gap-4 mt-4">
+      <label class="flex items-center gap-2 text-sm text-stone-600">
+        <input id="rememberMe" type="checkbox" class="rounded border-stone-300 text-moss-600 focus:ring-moss-400">
+        Remember on this device (encrypted)
+      </label>
+      <div class="flex-1 min-w-[200px] max-w-xs">
+        <label class="block text-xs font-medium text-stone-500 mb-1">Passphrase (encrypts the saved token)</label>
+        <input id="passphrase" type="password" placeholder="only you know this"
+          class="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-moss-400">
+      </div>
+      <button id="connectBtn" class="bg-moss-600 hover:bg-moss-700 text-white text-sm font-medium px-4 py-2 rounded-lg">Connect</button>
+      <button id="forgetBtn" class="hidden bg-stone-100 hover:bg-stone-200 text-stone-700 text-sm px-4 py-2 rounded-lg">Forget saved token</button>
+    </div>
+
+    <p class="text-xs text-stone-400 mt-3 leading-relaxed">
+      Encryption uses AES-GCM via the browser's Web Crypto API, keyed from your passphrase (PBKDF2, 250k iterations).
+      Only the encrypted token sits in localStorage — the passphrase itself is never stored. Honest limit: this protects
+      the token at rest on disk, not from something malicious already running in this page while it's open.
+    </p>
+    <div id="status" class="text-sm mt-3 min-h-[18px]"></div>
+  </div>
+
+  <!-- MAIN APP -->
+  <div id="appPanel" class="hidden">
+    <div class="bg-white border border-stone-200 rounded-xl p-4 shadow-sm mb-4 flex flex-wrap items-end gap-3">
+      <div class="flex-1 min-w-[220px]">
+        <label class="block text-xs font-medium text-stone-500 mb-1">Search (title, SKU, or barcode)</label>
+        <input id="searchBox" type="text" placeholder="e.g. soap, ARC-100, or a barcode"
+          class="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-moss-400">
+      </div>
+      <button id="loadBtn" class="bg-moss-600 hover:bg-moss-700 text-white text-sm font-medium px-4 py-2 rounded-lg">Load products</button>
+      <button id="loadMoreBtn" class="hidden bg-stone-100 hover:bg-stone-200 text-stone-700 text-sm px-4 py-2 rounded-lg">Load more</button>
+      <button id="disconnectBtn" class="hidden ml-auto bg-stone-100 hover:bg-stone-200 text-stone-700 text-sm px-4 py-2 rounded-lg">Disconnect</button>
+    </div>
+
+    <div class="bg-white border border-stone-200 rounded-xl shadow-sm overflow-hidden">
+      <div class="max-h-[60vh] overflow-y-auto">
+        <table class="w-full text-sm">
+          <thead class="sticky top-0 bg-stone-50 text-stone-500 text-xs uppercase tracking-wide">
+            <tr>
+              <th class="text-left font-medium px-4 py-2 w-[34%]">Product / Variant</th>
+              <th class="text-left font-medium px-4 py-2 w-[28%]">SKU</th>
+              <th class="text-left font-medium px-4 py-2 w-[28%]">Barcode</th>
+              <th class="px-4 py-2"></th>
+            </tr>
+          </thead>
+          <tbody id="tableBody" class="divide-y divide-stone-100"></tbody>
+        </table>
+      </div>
+      <div class="flex items-center justify-between px-4 py-3 border-t border-stone-200 bg-stone-50">
+        <div class="text-sm text-stone-600">
+          <span id="dirtyCount" class="inline-flex items-center justify-center bg-moss-600 text-white text-xs rounded-full px-2 py-0.5 mr-1">0</span>
+          unsaved change(s)
+        </div>
+        <button id="saveBtn" disabled
+          class="bg-moss-600 hover:bg-moss-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium px-4 py-2 rounded-lg">
+          Save changes to Shopify
+        </button>
+      </div>
+    </div>
+    <div id="appStatus" class="text-sm mt-3"></div>
+  </div>
+</div>
+
+<script>
+const VAULT_KEY = 'sku_tool_vault_v1';
+let state = {
+  shopDomain: '', accessToken: '',
+  products: [], cursor: null, hasNextPage: false, dirty: new Set()
+};
+
+// ---------- Crypto helpers ----------
+async function deriveKey(passphrase, saltBytes) {
+  const enc = new TextEncoder();
+  const keyMaterial = await crypto.subtle.importKey('raw', enc.encode(passphrase), 'PBKDF2', false, ['deriveKey']);
+  return crypto.subtle.deriveKey(
+    { name: 'PBKDF2', salt: saltBytes, iterations: 250000, hash: 'SHA-256' },
+    keyMaterial, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']
+  );
+}
+function b64(buf) { return btoa(String.fromCharCode(...new Uint8Array(buf))); }
+function unb64(str) { return Uint8Array.from(atob(str), c => c.charCodeAt(0)); }
+
+async function encryptToken(token, passphrase) {
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const key = await deriveKey(passphrase, salt);
+  const cipher = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(token));
+  return { salt: b64(salt), iv: b64(iv), cipher: b64(cipher) };
+}
+async function decryptToken(vault, passphrase) {
+  const key = await deriveKey(passphrase, unb64(vault.salt));
+  const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64(vault.iv) }, key, unb64(vault.cipher));
+  return new TextDecoder().decode(plain);
+}
+
+// ---------- Setup panel ----------
+const setupStatus = document.getElementById('status');
+function setSetupStatus(msg, isError) {
+  setupStatus.textContent = msg;
+  setupStatus.className = 'text-sm mt-3 min-h-[18px] ' + (isError ? 'text-red-600' : 'text-moss-700');
+}
+
+const savedVault = localStorage.getItem(VAULT_KEY);
+if (savedVault) {
+  document.getElementById('forgetBtn').classList.remove('hidden');
+  document.getElementById('accessToken').placeholder = 'saved — enter passphrase and Connect';
+}
+
+document.getElementById('forgetBtn').addEventListener('click', () => {
+  localStorage.removeItem(VAULT_KEY);
+  document.getElementById('forgetBtn').classList.add('hidden');
+  setSetupStatus('Saved token removed from this browser.', false);
+});
+
+document.getElementById('connectBtn').addEventListener('click', async () => {
+  const domain = document.getElementById('shopDomain').value.trim();
+  const remember = document.getElementById('rememberMe').checked;
+  const passphrase = document.getElementById('passphrase').value;
+  let token = document.getElementById('accessToken').value.trim();
+
+  try {
+    if (!token && savedVault) {
+      if (!passphrase) throw new Error('Enter the passphrase you used to save the token.');
+      const vault = JSON.parse(savedVault);
+      token = await decryptToken(vault, passphrase);
+    }
+    if (!domain || !token) throw new Error('Shop domain and access token are both required.');
+    if (!domain.endsWith('.myshopify.com')) throw new Error('Shop domain should look like your-store.myshopify.com');
+
+    setSetupStatus('Connecting…', false);
+    const test = await callShopify(domain, token, `{ shop { name } }`);
+    if (test.errors) throw new Error(test.errors[0].message);
+
+    state.shopDomain = domain; state.accessToken = token;
+
+    if (remember) {
+      if (!passphrase) throw new Error('Set a passphrase to save the token encrypted.');
+      const vault = await encryptToken(token, passphrase);
+      localStorage.setItem(VAULT_KEY, JSON.stringify(vault));
+    }
+
+    setSetupStatus(`Connected to ${test.data.shop.name}.`, false);
+    document.getElementById('setupPanel').classList.add('hidden');
+    document.getElementById('appPanel').classList.remove('hidden');
+    document.getElementById('disconnectBtn').classList.remove('hidden');
+  } catch (e) {
+    setSetupStatus(e.message, true);
+  }
+});
+
+document.getElementById('disconnectBtn').addEventListener('click', () => {
+  state = { shopDomain: '', accessToken: '', products: [], cursor: null, hasNextPage: false, dirty: new Set() };
+  document.getElementById('tableBody').innerHTML = '';
+  document.getElementById('appPanel').classList.add('hidden');
+  document.getElementById('setupPanel').classList.remove('hidden');
+});
+
+// ---------- Shopify call via same-origin FastAPI proxy ----------
+async function callShopify(domain, token, query, variables) {
+  const res = await fetch('/graphql', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Shopify-Shop-Domain': domain,
+      'X-Shopify-Access-Token': token
+    },
+    body: JSON.stringify({ query, variables })
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`Server error (${res.status}): ${text.slice(0,200)}`);
+  }
+  return res.json();
+}
+
+// ---------- Loading products ----------
+const PRODUCTS_QUERY = `
+query($cursor: String, $search: String) {
+  products(first: 20, after: $cursor, sortKey: TITLE, query: $search) {
+    pageInfo { hasNextPage endCursor }
+    nodes {
+      id
+      title
+      variants(first: 100) {
+        nodes {
+          id
+          title
+          barcode
+          inventoryItem { id sku }
+        }
+      }
+    }
+  }
+}`;
+
+const appStatus = document.getElementById('appStatus');
+function setAppStatus(msg, isError) {
+  appStatus.textContent = msg;
+  appStatus.className = 'text-sm mt-3 ' + (isError ? 'text-red-600' : 'text-moss-700');
+}
+
+document.getElementById('loadBtn').addEventListener('click', () => loadProducts(true));
+document.getElementById('loadMoreBtn').addEventListener('click', () => loadProducts(false));
+
+async function loadProducts(fresh) {
+  if (fresh) {
+    state.products = []; state.cursor = null; state.dirty.clear();
+    document.getElementById('tableBody').innerHTML = '';
+    updateDirtyBar();
+  }
+  const rawSearch = document.getElementById('searchBox').value.trim();
+  const search = rawSearch ? `title:*${rawSearch}* OR sku:*${rawSearch}* OR barcode:*${rawSearch}*` : null;
+
+  setAppStatus('Loading…', false);
+  try {
+    const result = await callShopify(state.shopDomain, state.accessToken, PRODUCTS_QUERY, { cursor: state.cursor, search });
+    if (result.errors) throw new Error(result.errors[0].message);
+    const { nodes, pageInfo } = result.data.products;
+    state.products.push(...nodes);
+    state.cursor = pageInfo.endCursor;
+    state.hasNextPage = pageInfo.hasNextPage;
+    document.getElementById('loadMoreBtn').classList.toggle('hidden', !state.hasNextPage);
+    renderTable();
+    setAppStatus(`Loaded ${state.products.length} product(s).`, false);
+  } catch (e) {
+    setAppStatus(e.message, true);
+  }
+}
+
+function renderTable() {
+  const tbody = document.getElementById('tableBody');
+  tbody.innerHTML = '';
+  for (const product of state.products) {
+    const prTr = document.createElement('tr');
+    prTr.className = 'bg-stone-50';
+    prTr.innerHTML = `<td colspan="4" class="px-4 py-2 font-semibold text-stone-800">${escapeHtml(product.title)}
+      <span class="text-xs font-normal text-stone-400">(${product.variants.nodes.length} variant${product.variants.nodes.length === 1 ? '' : 's'})</span></td>`;
+    tbody.appendChild(prTr);
+
+    for (const v of product.variants.nodes) {
+      const tr = document.createElement('tr');
+      const sku = v.inventoryItem ? (v.inventoryItem.sku || '') : '';
+      const barcode = v.barcode || '';
+      tr.innerHTML = `
+        <td class="px-4 py-1.5 text-stone-500 text-xs">↳ ${escapeHtml(v.title === 'Default Title' ? 'Default' : v.title)}</td>
+        <td class="px-4 py-1.5">
+          <input class="cell-input w-full rounded-md border border-stone-300 px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-moss-400"
+            type="text" data-kind="sku" data-product="${product.id}" data-variant="${v.id}"
+            data-invitem="${v.inventoryItem ? v.inventoryItem.id : ''}" value="${escapeAttr(sku)}">
+        </td>
+        <td class="px-4 py-1.5">
+          <input class="cell-input w-full rounded-md border border-stone-300 px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-moss-400"
+            type="text" data-kind="barcode" data-product="${product.id}" data-variant="${v.id}" value="${escapeAttr(barcode)}">
+        </td>
+        <td></td>`;
+      tbody.appendChild(tr);
+    }
+  }
+  tbody.querySelectorAll('input.cell-input').forEach(inp => {
+    inp.dataset.orig = inp.value;
+    inp.addEventListener('input', onCellInput);
+  });
+}
+
+function onCellInput(e) {
+  const inp = e.target;
+  const key = `${inp.dataset.variant}:${inp.dataset.kind}`;
+  if (inp.value !== inp.dataset.orig) {
+    inp.classList.add('bg-amber-50', 'border-amber-400');
+    state.dirty.add(key);
+  } else {
+    inp.classList.remove('bg-amber-50', 'border-amber-400');
+    state.dirty.delete(key);
+  }
+  updateDirtyBar();
+}
+
+function updateDirtyBar() {
+  document.getElementById('dirtyCount').textContent = state.dirty.size;
+  document.getElementById('saveBtn').disabled = state.dirty.size === 0;
+}
+
+// ---------- Saving ----------
+const BULK_UPDATE_MUTATION = `
+mutation($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
+  productVariantsBulkUpdate(productId: $productId, variants: $variants) {
+    productVariants { id barcode inventoryItem { sku } }
+    userErrors { field message }
+  }
+}`;
+
+document.getElementById('saveBtn').addEventListener('click', saveChanges);
+
+async function saveChanges() {
+  const byProduct = {};
+  document.querySelectorAll('input.cell-input.bg-amber-50').forEach(inp => {
+    const pid = inp.dataset.product, vid = inp.dataset.variant;
+    byProduct[pid] = byProduct[pid] || {};
+    byProduct[pid][vid] = byProduct[pid][vid] || { invItemId: inp.dataset.invitem };
+    byProduct[pid][vid][inp.dataset.kind] = inp.value;
+  });
+
+  const productIds = Object.keys(byProduct);
+  if (productIds.length === 0) return;
+
+  document.getElementById('saveBtn').disabled = true;
+  let okCount = 0, errCount = 0;
+  const errors = [];
+
+  for (const pid of productIds) {
+    const variantsInput = Object.entries(byProduct[pid]).map(([vid, changes]) => {
+      const input = { id: vid };
+      if ('barcode' in changes) input.barcode = changes.barcode;
+      if ('sku' in changes) input.inventoryItem = { sku: changes.sku };
+      return input;
+    });
+    setAppStatus(`Saving product ${okCount + errCount + 1} of ${productIds.length}…`, false);
+    try {
+      const result = await callShopify(state.shopDomain, state.accessToken, BULK_UPDATE_MUTATION, { productId: pid, variants: variantsInput });
+      if (result.errors) throw new Error(result.errors[0].message);
+      const ue = result.data.productVariantsBulkUpdate.userErrors;
+      if (ue && ue.length) throw new Error(ue.map(x => x.message).join('; '));
+      okCount++;
+    } catch (e) {
+      errCount++;
+      errors.push(`${pid}: ${e.message}`);
+    }
+  }
+
+  document.querySelectorAll('input.cell-input.bg-amber-50').forEach(inp => {
+    inp.dataset.orig = inp.value;
+    inp.classList.remove('bg-amber-50', 'border-amber-400');
+  });
+  state.dirty.clear();
+  updateDirtyBar();
+
+  if (errCount === 0) {
+    setAppStatus(`Saved ${okCount} product(s) successfully.`, false);
+  } else {
+    setAppStatus(`Saved ${okCount}, failed ${errCount}. ${errors.join(' | ')}`, true);
+  }
+}
+
+// ---------- utils ----------
+function escapeHtml(s) { return (s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function escapeAttr(s) { return escapeHtml(s); }
+</script>
+</body>
+</html>
