@@ -1,0 +1,40 @@
+name: Build Windows EXE
+
+on:
+  workflow_dispatch:      # lets you click "Run workflow" on GitHub whenever you want a new build
+  push:
+    branches: [ main ]
+    paths:
+      - "app.py"
+      - "static/**"
+      - "requirements.txt"
+      - ".github/workflows/build-windows.yml"
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build LindaSKUEditor.exe
+        run: >
+          pyinstaller --onefile --name LindaSKUEditor
+          --add-data "static;static"
+          --collect-all uvicorn
+          --collect-all fastapi
+          --collect-all starlette
+          app.py
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LindaSKUEditor-windows
+          path: dist/LindaSKUEditor.exe
