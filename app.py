@@ -13,9 +13,8 @@ Run:
 Then open http://localhost:8787
 """
 
-import sys
-import threading
-import webbrowser
+import os
+import subprocess
 import sys
 import threading
 import time
@@ -26,7 +25,6 @@ import httpx
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, Response
-import os
 
 from label_generator import generate_labels_pdf
 
@@ -59,6 +57,20 @@ load_dotenv(ENV_PATH)
 SHOP_DOMAIN = os.environ.get("SHOPIFY_SHOP_DOMAIN", "").strip()
 CLIENT_ID = os.environ.get("SHOPIFY_CLIENT_ID", "").strip()
 CLIENT_SECRET = os.environ.get("SHOPIFY_CLIENT_SECRET", "").strip()
+
+# Optional: set UPDATE_GITHUB_REPO in .env (e.g. "yourname/shopify-sku-tool")
+# to enable the "check for updates" banner. Leave unset to disable it entirely.
+UPDATE_GITHUB_REPO = os.environ.get("UPDATE_GITHUB_REPO", "").strip()
+
+
+def _read_app_version() -> str:
+    try:
+        return resource_path("VERSION").read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        return "dev"
+
+
+APP_VERSION = _read_app_version()
 
 # In-memory cache of the short-lived access token obtained via the client
 # credentials grant. Shopify no longer issues permanent tokens for custom
@@ -169,6 +181,105 @@ async def labels_pdf(request: Request):
         media_type="application/pdf",
         headers={"Content-Disposition": "attachment; filename=labels.pdf"},
     )
+
+
+def _parse_version(v: str):
+    try:
+        return tuple(int(p) for p in v.strip().lstrip("vV").split("."))
+    except (ValueError, AttributeError):
+        return None
+
+
+def _is_newer(latest: str, current: str) -> bool:
+    lt, ct = _parse_version(latest), _parse_version(current)
+    if lt is None or ct is None:
+        return latest != current  # can't parse — treat any difference as "there's an update"
+    return lt > ct
+
+
+async def _fetch_latest_release() -> dict:
+    async with httpx.AsyncClient(timeout=15) as client:
+        resp = await client.get(
+            f"https://api.github.com/repos/{UPDATE_GITHUB_REPO}/releases/latest",
+            headers={"Accept": "application/vnd.github+json", "User-Agent": "linda-sku-editor-updater"},
+        )
+    if resp.status_code != 200:
+        raise HTTPException(502, f"GitHub returned {resp.status_code} checking for updates")
+    return resp.json()
+
+
+@app.get("/api/update-status")
+async def update_status():
+    """Checks GitHub's latest release for this repo. Disabled entirely
+    unless UPDATE_GITHUB_REPO is set in .env — never phones home otherwise."""
+    if not UPDATE_GITHUB_REPO:
+        return {"enabled": False}
+    try:
+        data = await _fetch_latest_release()
+    except HTTPException as exc:
+        return {"enabled": True, "current": APP_VERSION, "error": exc.detail}
+    except httpx.RequestError as exc:
+        return {"enabled": True, "current": APP_VERSION, "error": str(exc)}
+
+    latest_version = (data.get("tag_name") or "").strip().lstrip("vV")
+    asset = next((a for a in data.get("assets", []) if a["name"].lower().endswith(".exe")), None)
+    return {
+        "enabled": True,
+        "current": APP_VERSION,
+        "latest": latest_version or None,
+        "update_available": bool(latest_version) and _is_newer(latest_version, APP_VERSION),
+        "download_url": asset["browser_download_url"] if asset else None,
+        "release_url": data.get("html_url"),
+        "is_packaged": getattr(sys, "frozen", False),
+    }
+
+
+@app.post("/api/self-update")
+async def self_update():
+    """Downloads the latest .exe and swaps it in via a tiny detached batch
+    script, then restarts. Only works for the packaged .exe — running from
+    source, use `git pull` instead."""
+    if not getattr(sys, "frozen", False):
+        raise HTTPException(400, "Auto-update only works in the packaged .exe. Use 'git pull' when running from source.")
+    if not UPDATE_GITHUB_REPO:
+        raise HTTPException(400, "UPDATE_GITHUB_REPO is not set in .env")
+
+    data = await _fetch_latest_release()
+    asset = next((a for a in data.get("assets", []) if a["name"].lower().endswith(".exe")), None)
+    if not asset:
+        raise HTTPException(502, "The latest GitHub release has no .exe file attached")
+
+    exe_path = Path(sys.executable)
+    new_path = exe_path.with_name(exe_path.stem + ".new.exe")
+
+    async with httpx.AsyncClient(timeout=120, follow_redirects=True) as client:
+        download = await client.get(asset["browser_download_url"])
+    if download.status_code != 200:
+        raise HTTPException(502, f"Download failed ({download.status_code})")
+    new_path.write_bytes(download.content)
+
+    # A short batch script does the actual swap after this process exits —
+    # Windows won't let a running .exe delete/overwrite itself directly.
+    bat_path = exe_path.with_name("_update.bat")
+    bat_path.write_text(
+        "@echo off\r\n"
+        "timeout /t 2 /nobreak >nul\r\n"
+        f'del "{exe_path}"\r\n'
+        f'ren "{new_path.name}" "{exe_path.name}"\r\n'
+        f'start "" "{exe_path}"\r\n'
+        'del "%~f0"\r\n'
+    )
+
+    detached = getattr(subprocess, "DETACHED_PROCESS", 0)
+    new_group = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    subprocess.Popen(["cmd", "/c", str(bat_path)], creationflags=detached | new_group, close_fds=True)
+
+    def _shutdown_soon():
+        time.sleep(1.0)
+        os._exit(0)
+
+    threading.Thread(target=_shutdown_soon, daemon=True).start()
+    return {"status": "updating", "message": "Update downloaded — restarting to install it."}
 
 
 def _open_browser_soon():
