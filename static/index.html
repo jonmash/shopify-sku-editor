@@ -86,7 +86,7 @@
 <div id="printModal" class="hidden fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
   <div class="bg-white rounded-xl shadow-lg w-full max-w-sm p-5">
     <div class="flex items-start justify-between mb-1">
-      <h2 class="text-base font-semibold text-stone-900">Print label</h2>
+      <h2 class="text-base font-semibold text-stone-900">Print a full sheet</h2>
       <button id="printModalClose" class="text-stone-400 hover:text-stone-600 text-lg leading-none">&times;</button>
     </div>
     <p class="text-xs text-stone-500 mb-4">Barcode: <span id="printModalBarcode" class="font-mono text-stone-700"></span></p>
@@ -110,6 +110,9 @@
 let state = {
   products: [], dirty: new Set()
 };
+
+// Matches label_generator.py's COLS x ROWS grid (4 x 9 per 4x6" sheet)
+const LABELS_PER_SHEET = 36;
 
 // Standard barcode format for new items: LNR001 – LNR999
 const BARCODE_PATTERN = /^LNR(\d{3})$/i;
@@ -417,12 +420,13 @@ document.getElementById('printModalConfirm').addEventListener('click', async () 
   const { barcode } = printModalContext;
   closePrintModal();
 
-  setAppStatus(`Generating label for ${barcode}…`, false);
+  setAppStatus(`Generating a full sheet for ${barcode}…`, false);
   try {
+    const items = Array.from({ length: LABELS_PER_SHEET }, () => ({ barcode, name }));
     const res = await fetch('/api/labels/pdf', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ items: [{ barcode, name }] })
+      body: JSON.stringify({ items })
     });
     if (!res.ok) {
       const text = await res.text().catch(() => '');
@@ -432,12 +436,12 @@ document.getElementById('printModalConfirm').addEventListener('click', async () 
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `label-${barcode}.pdf`;
+    a.download = `labels-${barcode}.pdf`;
     document.body.appendChild(a);
     a.click();
     a.remove();
     URL.revokeObjectURL(url);
-    setAppStatus(`Generated label for ${barcode}.`, false);
+    setAppStatus(`Generated a full sheet (${LABELS_PER_SHEET}) for ${barcode}.`, false);
   } catch (e) {
     setAppStatus(e.message, true);
   }
