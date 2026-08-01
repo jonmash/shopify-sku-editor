@@ -24,6 +24,15 @@
   <h1 class="text-xl font-semibold text-stone-900">Barcode Editor</h1>
   <p class="text-sm text-stone-500 mb-6">Linda's Natural Remedies — bulk edit variant barcodes without Matrixify.</p>
 
+  <!-- UPDATE BANNER -->
+  <div id="updateBanner" class="hidden bg-amber-50 border border-amber-300 text-amber-800 text-sm rounded-xl px-4 py-3 mb-4 flex items-center justify-between gap-3">
+    <span id="updateBannerText"></span>
+    <div class="flex items-center gap-2 shrink-0">
+      <a id="updateBannerLink" href="#" target="_blank" class="hidden underline text-amber-800">Download from GitHub</a>
+      <button id="updateBannerBtn" class="hidden bg-amber-600 hover:bg-amber-700 text-white text-sm font-medium px-3 py-1.5 rounded-lg">Update now</button>
+    </div>
+  </div>
+
   <!-- CONNECTION STATUS -->
   <div id="setupPanel" class="bg-white border border-stone-200 rounded-xl p-5 shadow-sm mb-6">
     <div id="statusChecking" class="text-sm text-stone-500">Checking connection…</div>
@@ -165,6 +174,55 @@ async function checkConnection() {
 
 document.getElementById('retryBtn').addEventListener('click', checkConnection);
 checkConnection();
+checkForUpdate();
+
+// ---------- Update check ----------
+async function checkForUpdate() {
+  try {
+    const res = await fetch('/api/update-status');
+    const status = await res.json();
+    if (!status.enabled || !status.update_available) return;
+
+    const banner = document.getElementById('updateBanner');
+    const text = document.getElementById('updateBannerText');
+    const link = document.getElementById('updateBannerLink');
+    const btn = document.getElementById('updateBannerBtn');
+
+    text.textContent = `A new version is available: ${status.latest} (you're on ${status.current}).`;
+    banner.classList.remove('hidden');
+
+    if (status.is_packaged) {
+      btn.classList.remove('hidden');
+      btn.addEventListener('click', installUpdate);
+    } else if (status.release_url) {
+      link.href = status.release_url;
+      link.classList.remove('hidden');
+    }
+  } catch (e) {
+    // Silent — an update check failing shouldn't interrupt normal use.
+  }
+}
+
+async function installUpdate() {
+  const btn = document.getElementById('updateBannerBtn');
+  const text = document.getElementById('updateBannerText');
+  btn.disabled = true;
+  btn.textContent = 'Updating…';
+  text.textContent = 'Downloading the update…';
+  try {
+    const res = await fetch('/api/self-update', { method: 'POST' });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.detail || `Server error (${res.status})`);
+    }
+    text.textContent = 'Update installed — restarting…';
+    setTimeout(() => { window.location.reload(); }, 4000);
+  } catch (e) {
+    text.textContent = `Update failed: ${e.message}`;
+    btn.disabled = false;
+    btn.textContent = 'Try again';
+  }
+}
 
 // ---------- Shopify call via same-origin FastAPI proxy ----------
 // The backend reads credentials from .env, exchanges them for a short-lived
