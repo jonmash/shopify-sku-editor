@@ -59,9 +59,9 @@
         <table class="w-full text-sm">
           <thead class="sticky top-0 bg-stone-50 text-stone-500 text-xs uppercase tracking-wide">
             <tr>
-              <th class="text-left font-medium px-4 py-2 w-[50%]">Product / Variant</th>
-              <th class="text-left font-medium px-4 py-2 w-[50%]">Barcode</th>
-              <th class="px-4 py-2"></th>
+              <th class="text-left font-medium px-4 py-2 w-[46%]">Product / Variant</th>
+              <th class="text-left font-medium px-4 py-2 w-[46%]">Barcode</th>
+              <th class="px-4 py-2 w-10"></th>
             </tr>
           </thead>
           <tbody id="tableBody" class="divide-y divide-stone-100"></tbody>
@@ -79,6 +79,30 @@
       </div>
     </div>
     <div id="appStatus" class="text-sm mt-3"></div>
+  </div>
+</div>
+
+<!-- PRINT LABEL MODAL -->
+<div id="printModal" class="hidden fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
+  <div class="bg-white rounded-xl shadow-lg w-full max-w-sm p-5">
+    <div class="flex items-start justify-between mb-1">
+      <h2 class="text-base font-semibold text-stone-900">Print label</h2>
+      <button id="printModalClose" class="text-stone-400 hover:text-stone-600 text-lg leading-none">&times;</button>
+    </div>
+    <p class="text-xs text-stone-500 mb-4">Barcode: <span id="printModalBarcode" class="font-mono text-stone-700"></span></p>
+
+    <label class="block text-xs font-medium text-stone-500 mb-1">Short name for the label</label>
+    <input id="printModalName" type="text" maxlength="40" placeholder="e.g. Arctic Balm"
+      class="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-moss-400">
+    <div class="flex justify-between mt-1 mb-4">
+      <span class="text-xs text-stone-400">Keep it under 15 characters if you can — it prints small.</span>
+      <span id="printModalCount" class="text-xs text-stone-400 shrink-0 ml-2">0/15</span>
+    </div>
+
+    <div class="flex justify-end gap-2">
+      <button id="printModalCancel" class="bg-stone-100 hover:bg-stone-200 text-stone-700 text-sm px-4 py-2 rounded-lg">Cancel</button>
+      <button id="printModalConfirm" class="bg-moss-600 hover:bg-moss-700 text-white text-sm font-medium px-4 py-2 rounded-lg">Print</button>
+    </div>
   </div>
 </div>
 
@@ -224,13 +248,14 @@ function renderTable() {
   for (const product of state.products) {
     const prTr = document.createElement('tr');
     prTr.className = 'bg-stone-50';
-    prTr.innerHTML = `<td colspan="3" class="px-4 py-2 font-semibold text-stone-800">${escapeHtml(product.title)}
+    prTr.innerHTML = `<td colspan="4" class="px-4 py-2 font-semibold text-stone-800">${escapeHtml(product.title)}
       <span class="text-xs font-normal text-stone-400">(${product.variants.nodes.length} variant${product.variants.nodes.length === 1 ? '' : 's'})</span></td>`;
     tbody.appendChild(prTr);
 
     for (const v of product.variants.nodes) {
       const tr = document.createElement('tr');
       const barcode = v.barcode || '';
+      const variantLabel = v.title === 'Default Title' ? product.title : `${product.title} — ${v.title}`;
       tr.innerHTML = `
         <td class="px-4 py-1.5 text-stone-500 text-xs">↳ ${escapeHtml(v.title === 'Default Title' ? 'Default' : v.title)}</td>
         <td class="px-4 py-1.5">
@@ -240,7 +265,16 @@ function renderTable() {
             <button class="auto-btn shrink-0 bg-stone-100 hover:bg-stone-200 text-stone-600 text-xs px-2 py-1.5 rounded-md ${barcode ? 'hidden' : ''}">Auto</button>
           </div>
         </td>
-        <td></td>`;
+        <td class="px-2 py-1.5 text-center">
+          <button class="print-btn inline-flex items-center justify-center w-7 h-7 rounded-md text-stone-500 hover:bg-stone-100 hover:text-stone-800 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+            data-default-name="${escapeAttr(variantLabel)}" title="Print label" ${barcode ? '' : 'disabled'}>
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-4 h-4">
+              <polyline points="6 9 6 2 18 2 18 9"></polyline>
+              <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path>
+              <rect x="6" y="14" width="12" height="8"></rect>
+            </svg>
+          </button>
+        </td>`;
       tbody.appendChild(tr);
     }
   }
@@ -250,6 +284,9 @@ function renderTable() {
   });
   tbody.querySelectorAll('button.auto-btn').forEach(btn => {
     btn.addEventListener('click', onAutoClick);
+  });
+  tbody.querySelectorAll('button.print-btn').forEach(btn => {
+    btn.addEventListener('click', onPrintClick);
   });
   updateDuplicateHighlights();
 }
@@ -265,6 +302,7 @@ function onCellInput(e) {
     state.dirty.delete(vid);
   }
   toggleAutoButton(inp);
+  togglePrintButton(inp);
   updateDuplicateHighlights();
   updateDirtyBar();
 }
@@ -272,6 +310,12 @@ function onCellInput(e) {
 function toggleAutoButton(inp) {
   const btn = inp.parentElement.querySelector('.auto-btn');
   if (btn) btn.classList.toggle('hidden', inp.value.trim() !== '');
+}
+
+function togglePrintButton(inp) {
+  const tr = inp.closest('tr');
+  const btn = tr ? tr.querySelector('.print-btn') : null;
+  if (btn) btn.disabled = inp.value.trim() === '';
 }
 
 function onAutoClick(e) {
@@ -319,6 +363,85 @@ function updateDirtyBar() {
   document.getElementById('dirtyCount').textContent = state.dirty.size;
   document.getElementById('saveBtn').disabled = state.dirty.size === 0;
 }
+
+// ---------- Print one label (with a short-name modal) ----------
+let printModalContext = null; // { barcode }
+
+function onPrintClick(e) {
+  const btn = e.currentTarget;
+  const tr = btn.closest('tr');
+  const barcodeInput = tr.querySelector('input.barcode-input');
+  const barcode = barcodeInput ? barcodeInput.value.trim() : '';
+  if (!barcode) return;
+  openPrintModal(barcode, btn.dataset.defaultName || '');
+}
+
+function openPrintModal(barcode, defaultName) {
+  printModalContext = { barcode };
+  document.getElementById('printModalBarcode').textContent = barcode;
+  const input = document.getElementById('printModalName');
+  input.value = defaultName.slice(0, 15);
+  document.getElementById('printModal').classList.remove('hidden');
+  updatePrintModalCount();
+  input.focus();
+  input.select();
+}
+
+function closePrintModal() {
+  document.getElementById('printModal').classList.add('hidden');
+  printModalContext = null;
+}
+
+function updatePrintModalCount() {
+  const len = document.getElementById('printModalName').value.length;
+  const counter = document.getElementById('printModalCount');
+  counter.textContent = `${len}/15`;
+  counter.classList.toggle('text-red-500', len > 15);
+  counter.classList.toggle('text-stone-400', len <= 15);
+}
+
+document.getElementById('printModalName').addEventListener('input', updatePrintModalCount);
+document.getElementById('printModalCancel').addEventListener('click', closePrintModal);
+document.getElementById('printModalClose').addEventListener('click', closePrintModal);
+document.getElementById('printModal').addEventListener('click', (e) => {
+  if (e.target.id === 'printModal') closePrintModal();
+});
+document.getElementById('printModalName').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); document.getElementById('printModalConfirm').click(); }
+  if (e.key === 'Escape') closePrintModal();
+});
+
+document.getElementById('printModalConfirm').addEventListener('click', async () => {
+  if (!printModalContext) return;
+  const name = document.getElementById('printModalName').value.trim();
+  const { barcode } = printModalContext;
+  closePrintModal();
+
+  setAppStatus(`Generating label for ${barcode}…`, false);
+  try {
+    const res = await fetch('/api/labels/pdf', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items: [{ barcode, name }] })
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw new Error(`Server error (${res.status}): ${text.slice(0,200)}`);
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `label-${barcode}.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    setAppStatus(`Generated label for ${barcode}.`, false);
+  } catch (e) {
+    setAppStatus(e.message, true);
+  }
+});
 
 // ---------- Saving ----------
 const BULK_UPDATE_MUTATION = `
