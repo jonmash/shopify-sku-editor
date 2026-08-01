@@ -25,8 +25,10 @@ from pathlib import Path
 import httpx
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 import os
+
+from label_generator import generate_labels_pdf
 
 app = FastAPI(title="Linda's Natural Remedies — SKU Editor")
 
@@ -150,6 +152,23 @@ async def graphql_proxy(request: Request):
         raise HTTPException(resp.status_code, "Shopify returned a non-JSON response")
 
     return JSONResponse(content=payload, status_code=resp.status_code)
+
+
+@app.post("/api/labels/pdf")
+async def labels_pdf(request: Request):
+    body = await request.json()
+    items = body.get("items", [])
+    if not items:
+        raise HTTPException(400, "No items provided")
+    if not isinstance(items, list) or len(items) > 500:
+        raise HTTPException(400, "Provide a list of up to 500 {barcode, name} items")
+
+    pdf_bytes = generate_labels_pdf(items)
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": "attachment; filename=labels.pdf"},
+    )
 
 
 def _open_browser_soon():
