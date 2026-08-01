@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Linda's Natural Remedies — SKU / Barcode Editor</title>
+<title>Linda's Natural Remedies — Barcode Editor</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <script>
   tailwind.config = {
@@ -21,8 +21,8 @@
 <body class="bg-cream text-stone-800 font-sans min-h-screen p-6">
 
 <div class="max-w-6xl mx-auto">
-  <h1 class="text-xl font-semibold text-stone-900">SKU / Barcode Editor</h1>
-  <p class="text-sm text-stone-500 mb-6">Linda's Natural Remedies — bulk edit variant SKUs and barcodes without Matrixify.</p>
+  <h1 class="text-xl font-semibold text-stone-900">Barcode Editor</h1>
+  <p class="text-sm text-stone-500 mb-6">Linda's Natural Remedies — bulk edit variant barcodes without Matrixify.</p>
 
   <!-- CONNECTION STATUS -->
   <div id="setupPanel" class="bg-white border border-stone-200 rounded-xl p-5 shadow-sm mb-6">
@@ -46,12 +46,12 @@
   <div id="appPanel" class="hidden">
     <div class="bg-white border border-stone-200 rounded-xl p-4 shadow-sm mb-4 flex flex-wrap items-end gap-3">
       <div class="flex-1 min-w-[220px]">
-        <label class="block text-xs font-medium text-stone-500 mb-1">Search (title, SKU, or barcode)</label>
-        <input id="searchBox" type="text" placeholder="e.g. soap, ARC-100, or a barcode"
+        <label class="block text-xs font-medium text-stone-500 mb-1">Search (title or barcode)</label>
+        <input id="searchBox" type="text" placeholder="e.g. soap, or LNR014"
           class="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-moss-400">
       </div>
-      <button id="loadBtn" class="bg-moss-600 hover:bg-moss-700 text-white text-sm font-medium px-4 py-2 rounded-lg">Load products</button>
-      <button id="loadMoreBtn" class="hidden bg-stone-100 hover:bg-stone-200 text-stone-700 text-sm px-4 py-2 rounded-lg">Load more</button>
+      <button id="searchBtn" class="bg-moss-600 hover:bg-moss-700 text-white text-sm font-medium px-4 py-2 rounded-lg">Search</button>
+      <button id="refreshBtn" class="bg-stone-100 hover:bg-stone-200 text-stone-700 text-sm px-4 py-2 rounded-lg">Refresh</button>
     </div>
 
     <div class="bg-white border border-stone-200 rounded-xl shadow-sm overflow-hidden">
@@ -59,9 +59,8 @@
         <table class="w-full text-sm">
           <thead class="sticky top-0 bg-stone-50 text-stone-500 text-xs uppercase tracking-wide">
             <tr>
-              <th class="text-left font-medium px-4 py-2 w-[34%]">Product / Variant</th>
-              <th class="text-left font-medium px-4 py-2 w-[28%]">SKU</th>
-              <th class="text-left font-medium px-4 py-2 w-[28%]">Barcode</th>
+              <th class="text-left font-medium px-4 py-2 w-[50%]">Product / Variant</th>
+              <th class="text-left font-medium px-4 py-2 w-[50%]">Barcode</th>
               <th class="px-4 py-2"></th>
             </tr>
           </thead>
@@ -85,8 +84,11 @@
 
 <script>
 let state = {
-  products: [], cursor: null, hasNextPage: false, dirty: new Set()
+  products: [], dirty: new Set()
 };
+
+// Standard barcode format for new items: LNR001 – LNR999
+const BARCODE_PATTERN = /^LNR(\d{3})$/i;
 
 // ---------- Connection status (reads .env via the backend) ----------
 async function checkConnection() {
@@ -126,6 +128,7 @@ async function checkConnection() {
     document.getElementById('statusOk').classList.remove('hidden');
     document.getElementById('statusOk').textContent = `Connected to ${test.data.shop.name} (${status.shop_domain}).`;
     document.getElementById('appPanel').classList.remove('hidden');
+    loadProducts(); // auto-load the full catalog once connected
   } catch (e) {
     document.getElementById('statusChecking').classList.add('hidden');
     document.getElementById('statusError').classList.remove('hidden');
@@ -154,20 +157,17 @@ async function callShopify(query, variables) {
 }
 
 // ---------- Loading products ----------
+// The store's catalog is small, so we page through everything in one go
+// rather than exposing a "Load more" button.
 const PRODUCTS_QUERY = `
 query($cursor: String, $search: String) {
-  products(first: 20, after: $cursor, sortKey: TITLE, query: $search) {
+  products(first: 50, after: $cursor, sortKey: TITLE, query: $search) {
     pageInfo { hasNextPage endCursor }
     nodes {
       id
       title
       variants(first: 100) {
-        nodes {
-          id
-          title
-          barcode
-          inventoryItem { id sku }
-        }
+        nodes { id title barcode }
       }
     }
   }
@@ -179,27 +179,38 @@ function setAppStatus(msg, isError) {
   appStatus.className = 'text-sm mt-3 ' + (isError ? 'text-red-600' : 'text-moss-700');
 }
 
-document.getElementById('loadBtn').addEventListener('click', () => loadProducts(true));
-document.getElementById('loadMoreBtn').addEventListener('click', () => loadProducts(false));
+document.getElementById('searchBtn').addEventListener('click', () => loadProducts());
+document.getElementById('refreshBtn').addEventListener('click', () => {
+  document.getElementById('searchBox').value = '';
+  loadProducts();
+});
+document.getElementById('searchBox').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') loadProducts();
+});
 
-async function loadProducts(fresh) {
-  if (fresh) {
-    state.products = []; state.cursor = null; state.dirty.clear();
-    document.getElementById('tableBody').innerHTML = '';
-    updateDirtyBar();
-  }
+async function loadProducts() {
+  state.products = [];
+  state.dirty.clear();
+  document.getElementById('tableBody').innerHTML = '';
+  updateDirtyBar();
+
   const rawSearch = document.getElementById('searchBox').value.trim();
-  const search = rawSearch ? `title:*${rawSearch}* OR sku:*${rawSearch}* OR barcode:*${rawSearch}*` : null;
+  const search = rawSearch ? `title:*${rawSearch}* OR barcode:*${rawSearch}*` : null;
 
   setAppStatus('Loading…', false);
   try {
-    const result = await callShopify(PRODUCTS_QUERY, { cursor: state.cursor, search });
-    if (result.errors) throw new Error(result.errors[0].message);
-    const { nodes, pageInfo } = result.data.products;
-    state.products.push(...nodes);
-    state.cursor = pageInfo.endCursor;
-    state.hasNextPage = pageInfo.hasNextPage;
-    document.getElementById('loadMoreBtn').classList.toggle('hidden', !state.hasNextPage);
+    let cursor = null, hasNextPage = true, pages = 0;
+    while (hasNextPage) {
+      const result = await callShopify(PRODUCTS_QUERY, { cursor, search });
+      if (result.errors) throw new Error(result.errors[0].message);
+      const { nodes, pageInfo } = result.data.products;
+      state.products.push(...nodes);
+      cursor = pageInfo.endCursor;
+      hasNextPage = pageInfo.hasNextPage;
+      pages++;
+      if (state.products.length) setAppStatus(`Loading… (${state.products.length} product(s) so far)`, false);
+      if (pages > 50) break; // safety valve against a runaway loop
+    }
     renderTable();
     setAppStatus(`Loaded ${state.products.length} product(s).`, false);
   } catch (e) {
@@ -213,46 +224,95 @@ function renderTable() {
   for (const product of state.products) {
     const prTr = document.createElement('tr');
     prTr.className = 'bg-stone-50';
-    prTr.innerHTML = `<td colspan="4" class="px-4 py-2 font-semibold text-stone-800">${escapeHtml(product.title)}
+    prTr.innerHTML = `<td colspan="3" class="px-4 py-2 font-semibold text-stone-800">${escapeHtml(product.title)}
       <span class="text-xs font-normal text-stone-400">(${product.variants.nodes.length} variant${product.variants.nodes.length === 1 ? '' : 's'})</span></td>`;
     tbody.appendChild(prTr);
 
     for (const v of product.variants.nodes) {
       const tr = document.createElement('tr');
-      const sku = v.inventoryItem ? (v.inventoryItem.sku || '') : '';
       const barcode = v.barcode || '';
       tr.innerHTML = `
         <td class="px-4 py-1.5 text-stone-500 text-xs">↳ ${escapeHtml(v.title === 'Default Title' ? 'Default' : v.title)}</td>
         <td class="px-4 py-1.5">
-          <input class="cell-input w-full rounded-md border border-stone-300 px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-moss-400"
-            type="text" data-kind="sku" data-product="${product.id}" data-variant="${v.id}"
-            data-invitem="${v.inventoryItem ? v.inventoryItem.id : ''}" value="${escapeAttr(sku)}">
-        </td>
-        <td class="px-4 py-1.5">
-          <input class="cell-input w-full rounded-md border border-stone-300 px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-moss-400"
-            type="text" data-kind="barcode" data-product="${product.id}" data-variant="${v.id}" value="${escapeAttr(barcode)}">
+          <div class="flex items-center gap-2">
+            <input class="barcode-input flex-1 rounded-md border border-stone-300 px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-moss-400"
+              type="text" data-product="${product.id}" data-variant="${v.id}" value="${escapeAttr(barcode)}">
+            <button class="auto-btn shrink-0 bg-stone-100 hover:bg-stone-200 text-stone-600 text-xs px-2 py-1.5 rounded-md ${barcode ? 'hidden' : ''}">Auto</button>
+          </div>
         </td>
         <td></td>`;
       tbody.appendChild(tr);
     }
   }
-  tbody.querySelectorAll('input.cell-input').forEach(inp => {
+  tbody.querySelectorAll('input.barcode-input').forEach(inp => {
     inp.dataset.orig = inp.value;
     inp.addEventListener('input', onCellInput);
   });
+  tbody.querySelectorAll('button.auto-btn').forEach(btn => {
+    btn.addEventListener('click', onAutoClick);
+  });
+  updateDuplicateHighlights();
 }
 
 function onCellInput(e) {
   const inp = e.target;
-  const key = `${inp.dataset.variant}:${inp.dataset.kind}`;
+  const vid = inp.dataset.variant;
   if (inp.value !== inp.dataset.orig) {
     inp.classList.add('bg-amber-50', 'border-amber-400');
-    state.dirty.add(key);
+    state.dirty.add(vid);
   } else {
     inp.classList.remove('bg-amber-50', 'border-amber-400');
-    state.dirty.delete(key);
+    state.dirty.delete(vid);
   }
+  toggleAutoButton(inp);
+  updateDuplicateHighlights();
   updateDirtyBar();
+}
+
+function toggleAutoButton(inp) {
+  const btn = inp.parentElement.querySelector('.auto-btn');
+  if (btn) btn.classList.toggle('hidden', inp.value.trim() !== '');
+}
+
+function onAutoClick(e) {
+  const inp = e.target.closest('div').querySelector('input.barcode-input');
+  try {
+    inp.value = nextAvailableBarcode();
+  } catch (err) {
+    setAppStatus(err.message, true);
+    return;
+  }
+  inp.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+function nextAvailableBarcode() {
+  let maxNum = 0;
+  document.querySelectorAll('input.barcode-input').forEach(inp => {
+    const m = inp.value.trim().match(BARCODE_PATTERN);
+    if (m) {
+      const n = parseInt(m[1], 10);
+      if (n > maxNum) maxNum = n;
+    }
+  });
+  const next = maxNum + 1;
+  if (next > 999) throw new Error('All LNR barcode numbers (001–999) are in use.');
+  return 'LNR' + String(next).padStart(3, '0');
+}
+
+function updateDuplicateHighlights() {
+  const counts = {};
+  document.querySelectorAll('input.barcode-input').forEach(inp => {
+    const v = inp.value.trim();
+    if (v) counts[v] = (counts[v] || 0) + 1;
+  });
+  document.querySelectorAll('input.barcode-input').forEach(inp => {
+    const v = inp.value.trim();
+    const isDup = v && counts[v] > 1;
+    inp.classList.toggle('ring-2', isDup);
+    inp.classList.toggle('ring-orange-400', isDup);
+    const tr = inp.closest('tr');
+    if (tr) tr.classList.toggle('bg-orange-50', isDup);
+  });
 }
 
 function updateDirtyBar() {
@@ -264,7 +324,7 @@ function updateDirtyBar() {
 const BULK_UPDATE_MUTATION = `
 mutation($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
   productVariantsBulkUpdate(productId: $productId, variants: $variants) {
-    productVariants { id barcode inventoryItem { sku } }
+    productVariants { id barcode }
     userErrors { field message }
   }
 }`;
@@ -273,11 +333,10 @@ document.getElementById('saveBtn').addEventListener('click', saveChanges);
 
 async function saveChanges() {
   const byProduct = {};
-  document.querySelectorAll('input.cell-input.bg-amber-50').forEach(inp => {
+  document.querySelectorAll('input.barcode-input.bg-amber-50').forEach(inp => {
     const pid = inp.dataset.product, vid = inp.dataset.variant;
     byProduct[pid] = byProduct[pid] || {};
-    byProduct[pid][vid] = byProduct[pid][vid] || { invItemId: inp.dataset.invitem };
-    byProduct[pid][vid][inp.dataset.kind] = inp.value;
+    byProduct[pid][vid] = inp.value;
   });
 
   const productIds = Object.keys(byProduct);
@@ -288,12 +347,7 @@ async function saveChanges() {
   const errors = [];
 
   for (const pid of productIds) {
-    const variantsInput = Object.entries(byProduct[pid]).map(([vid, changes]) => {
-      const input = { id: vid };
-      if ('barcode' in changes) input.barcode = changes.barcode;
-      if ('sku' in changes) input.inventoryItem = { sku: changes.sku };
-      return input;
-    });
+    const variantsInput = Object.entries(byProduct[pid]).map(([vid, barcode]) => ({ id: vid, barcode }));
     setAppStatus(`Saving product ${okCount + errCount + 1} of ${productIds.length}…`, false);
     try {
       const result = await callShopify(BULK_UPDATE_MUTATION, { productId: pid, variants: variantsInput });
@@ -307,7 +361,7 @@ async function saveChanges() {
     }
   }
 
-  document.querySelectorAll('input.cell-input.bg-amber-50').forEach(inp => {
+  document.querySelectorAll('input.barcode-input.bg-amber-50').forEach(inp => {
     inp.dataset.orig = inp.value;
     inp.classList.remove('bg-amber-50', 'border-amber-400');
   });
