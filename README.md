@@ -90,17 +90,64 @@ Windows will likely show a "Windows protected your PC" warning the first
 time (the exe isn't code-signed) — click "More info" → "Run anyway." It only
 asks once per machine.
 
+## Auto-updating
+
+The app can check GitHub for newer releases and update itself with one
+click — no manual downloading or file-copying.
+
+**To enable it:** add to `.env`:
+```
+UPDATE_GITHUB_REPO=yourname/your-repo-name
+```
+Leave it unset and the feature stays completely off (no network calls to
+GitHub at all).
+
+**To publish a new version:**
+1. Bump the version in the `VERSION` file (e.g. `1.1.0`) and commit it.
+2. Tag and push:
+   ```
+   git tag v1.1.0
+   git push --tags
+   ```
+3. GitHub Actions builds the `.exe` and publishes it as a GitHub Release
+   automatically (see `.github/workflows/build-windows.yml`).
+
+**What the user sees:** next time the app starts, if the Release's version
+is newer than the running one, an amber banner appears with an "Update now"
+button. Clicking it downloads the new `.exe`, swaps it in, and restarts —
+takes a few seconds, no manual steps.
+
+**How the swap works, and its limits:**
+- Only works for the packaged `.exe` — running from source (`python app.py`)
+  shows a "Download from GitHub" link instead, since there's no single file
+  to swap.
+- A running `.exe` can't overwrite itself directly on Windows, so the app
+  downloads the new version, writes a tiny batch script that waits a moment,
+  deletes the old exe, renames the new one into place, and relaunches it —
+  then the app exits so the batch script can finish the swap.
+- This mechanism was written from well-established Windows patterns but
+  **hasn't been tested on an actual Windows machine yet** — worth doing one
+  real update run yourself before relying on it unattended. If it ever
+  fails partway through, worst case is `LindaSKUEditor.exe` is missing and
+  `LindaSKUEditor.new.exe` sits next to it — just rename the `.new.exe` by
+  hand to recover.
+- The update check itself (not the install) runs on every startup and fails
+  silently if GitHub is unreachable — it never blocks normal use.
+
 ## Project structure
 
 ```
 app.py                       FastAPI backend — serves the page, proxies
-                              Shopify API calls, generates label PDFs
+                              Shopify API calls, generates label PDFs,
+                              handles update checks
 label_generator.py           Builds the label sheet PDF (DataMatrix + text)
 static/index.html            The whole UI (Tailwind, vanilla JS)
 requirements.txt             Python dependencies
+VERSION                      This build's version number (bump + tag to release)
 .env.example                 Template for your local .env (copy, don't edit)
 .gitignore                   Keeps .env and build artifacts out of git
 .github/workflows/           GitHub Actions job that builds the Windows exe
+                              and publishes tagged releases
 ```
 
 ## Notes & limitations
