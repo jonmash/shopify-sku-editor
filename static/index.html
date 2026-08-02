@@ -23,11 +23,22 @@
 <body class="bg-cream text-stone-800 font-sans min-h-screen p-6">
 
 <div class="max-w-6xl mx-auto">
-  <h1 class="text-xl font-semibold text-stone-900 inline-flex items-baseline gap-2">
-    Barcode Editor
-    <span id="appVersionBadge" class="text-xs font-normal text-stone-400"></span>
-  </h1>
-  <p class="text-sm text-stone-500 mb-6">Linda's Natural Remedies — bulk edit variant barcodes without Matrixify.</p>
+<div class="flex flex-wrap items-start justify-between gap-3 mb-1">
+  <div>
+    <h1 class="text-xl font-semibold text-stone-900 inline-flex items-baseline gap-2">
+      Barcode Editor
+      <span id="appVersionBadge" class="text-xs font-normal text-stone-400"></span>
+    </h1>
+    <p class="text-sm text-stone-500">Linda's Natural Remedies — bulk edit variant barcodes without Matrixify.</p>
+  </div>
+  <div id="headerToolbar" class="hidden items-center gap-2 shrink-0 pt-1">
+    <input id="searchBox" type="text" placeholder="Search title or barcode…"
+      class="w-52 rounded-lg border border-stone-300 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-moss-400">
+    <button id="searchBtn" class="bg-moss-600 hover:bg-moss-700 text-white text-sm px-3 py-1.5 rounded-lg">Search</button>
+    <button id="refreshBtn" class="bg-stone-100 hover:bg-stone-200 text-stone-700 text-sm px-3 py-1.5 rounded-lg">Refresh</button>
+  </div>
+</div>
+<div id="statusOk" class="hidden text-xs text-stone-400 mb-2"></div>
 
   <!-- UPDATE BANNER -->
   <div id="updateBanner" class="hidden bg-amber-50 border border-amber-300 text-amber-800 text-sm rounded-xl px-4 py-3 mb-4 flex items-center justify-between gap-3">
@@ -54,20 +65,8 @@
     </div>
   </div>
 
-  <div id="statusOk" class="hidden text-xs text-stone-400 mb-3"></div>
-
   <!-- MAIN APP -->
   <div id="appPanel" class="hidden">
-    <div class="bg-white border border-stone-200 rounded-xl p-4 shadow-sm mb-4 flex flex-wrap items-end gap-3">
-      <div class="flex-1 min-w-[220px]">
-        <label class="block text-xs font-medium text-stone-500 mb-1">Search (title or barcode)</label>
-        <input id="searchBox" type="text" placeholder="e.g. soap, or LNR014"
-          class="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-moss-400">
-      </div>
-      <button id="searchBtn" class="bg-moss-600 hover:bg-moss-700 text-white text-sm font-medium px-4 py-2 rounded-lg">Search</button>
-      <button id="refreshBtn" class="bg-stone-100 hover:bg-stone-200 text-stone-700 text-sm px-4 py-2 rounded-lg">Refresh</button>
-    </div>
-
     <div class="bg-white border border-stone-200 rounded-xl shadow-sm overflow-hidden">
       <div class="max-h-[60vh] overflow-y-auto overscroll-y-auto">
         <table class="w-full text-sm">
@@ -135,6 +134,8 @@ const BARCODE_PATTERN = /^LNR(\d{3})$/i;
 async function checkConnection() {
   document.getElementById('setupPanel').classList.remove('hidden');
   document.getElementById('statusOk').classList.add('hidden');
+  document.getElementById('headerToolbar').classList.add('hidden');
+  document.getElementById('headerToolbar').classList.remove('flex');
   document.getElementById('statusChecking').classList.remove('hidden');
   document.getElementById('statusError').classList.add('hidden');
 
@@ -175,6 +176,8 @@ async function checkConnection() {
     document.getElementById('statusOk').classList.remove('hidden');
     document.getElementById('statusOk').textContent = `Connected to ${test.data.shop.name} (${status.shop_domain}).`;
     document.getElementById('appPanel').classList.remove('hidden');
+    document.getElementById('headerToolbar').classList.remove('hidden');
+    document.getElementById('headerToolbar').classList.add('flex');
     loadProducts(); // auto-load the full catalog once connected
   } catch (e) {
     document.getElementById('statusChecking').classList.add('hidden');
