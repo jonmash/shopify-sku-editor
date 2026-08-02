@@ -260,6 +260,7 @@ async def self_update():
 
     exe_path = Path(sys.executable)
     new_path = exe_path.with_name(exe_path.stem + ".new.exe")
+    log_path = exe_path.with_name("update_log.txt")
 
     async with httpx.AsyncClient(timeout=120, follow_redirects=True) as client:
         download = await client.get(asset["browser_download_url"])
@@ -269,14 +270,52 @@ async def self_update():
 
     # A short batch script does the actual swap after this process exits —
     # Windows won't let a running .exe delete/overwrite itself directly.
+    #
+    # This does NOT just sleep a fixed couple of seconds and hope for the
+    # best: PyInstaller onefile .exes unpack to a temp dir on launch and
+    # have to tear that down on exit, which can take longer than a couple
+    # of seconds (more so if antivirus is scanning). So instead it polls
+    # for this exact process's PID to actually disappear from `tasklist`,
+    # then retries the delete/move a few times in case something still has
+    # a momentary lock on the file, logging each step to update_log.txt so
+    # a failure is diagnosable afterwards instead of just a dead browser tab.
+    my_pid = os.getpid()
     bat_path = exe_path.with_name("_update.bat")
     bat_path.write_text(
         "@echo off\r\n"
-        "timeout /t 2 /nobreak >nul\r\n"
-        f'del "{exe_path}"\r\n'
-        f'ren "{new_path.name}" "{exe_path.name}"\r\n'
+        f'cd /d "{exe_path.parent}"\r\n'
+        f'echo [%date% %time%] Update started, waiting on PID {my_pid} to exit > "{log_path}"\r\n'
+        "\r\n"
+        ":waitexit\r\n"
+        f'tasklist /fi "PID eq {my_pid}" 2>nul | find "{my_pid}" >nul\r\n'
+        "if not errorlevel 1 (\r\n"
+        "    timeout /t 1 /nobreak >nul\r\n"
+        "    goto waitexit\r\n"
+        ")\r\n"
+        f'echo [%date% %time%] Old process exited, replacing exe >> "{log_path}"\r\n'
+        "\r\n"
+        "set DELRETRIES=0\r\n"
+        ":retrydel\r\n"
+        f'del /f /q "{exe_path}" 2>nul\r\n'
+        f'if exist "{exe_path}" (\r\n'
+        "    set /a DELRETRIES+=1\r\n"
+        f'    echo [%date% %time%] Delete attempt %DELRETRIES% failed, retrying >> "{log_path}"\r\n'
+        "    if %DELRETRIES% GEQ 15 goto updatefailed\r\n"
+        "    timeout /t 1 /nobreak >nul\r\n"
+        "    goto retrydel\r\n"
+        ")\r\n"
+        "\r\n"
+        f'move /y "{new_path}" "{exe_path}" >nul\r\n'
+        f'if not exist "{exe_path}" goto updatefailed\r\n'
+        f'echo [%date% %time%] Swap complete, launching new exe >> "{log_path}"\r\n'
         f'start "" "{exe_path}"\r\n'
-        'del "%~f0"\r\n'
+        f'del "%~f0"\r\n'
+        "exit\r\n"
+        "\r\n"
+        ":updatefailed\r\n"
+        f'echo [%date% %time%] Update FAILED — could not replace the exe. >> "{log_path}"\r\n'
+        f'echo The old exe may be missing. If so, rename "{new_path.name}" to "{exe_path.name}" by hand. >> "{log_path}"\r\n'
+        f'if exist "{new_path}" start "" "{new_path}"\r\n'
     )
 
     detached = getattr(subprocess, "DETACHED_PROCESS", 0)
@@ -284,7 +323,7 @@ async def self_update():
     subprocess.Popen(["cmd", "/c", str(bat_path)], creationflags=detached | new_group, close_fds=True)
 
     def _shutdown_soon():
-        time.sleep(1.0)
+        time.sleep(0.5)
         os._exit(0)
 
     threading.Thread(target=_shutdown_soon, daemon=True).start()
