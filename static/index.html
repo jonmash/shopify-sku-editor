@@ -23,7 +23,10 @@
 <body class="bg-cream text-stone-800 font-sans min-h-screen p-6">
 
 <div class="max-w-6xl mx-auto">
-  <h1 class="text-xl font-semibold text-stone-900">Barcode Editor</h1>
+  <h1 class="text-xl font-semibold text-stone-900 inline-flex items-baseline gap-2">
+    Barcode Editor
+    <span id="appVersionBadge" class="text-xs font-normal text-stone-400"></span>
+  </h1>
   <p class="text-sm text-stone-500 mb-6">Linda's Natural Remedies — bulk edit variant barcodes without Matrixify.</p>
 
   <!-- UPDATE BANNER -->
@@ -49,9 +52,9 @@
       <p class="text-xs text-stone-400 mb-3">Looking for it at: <span id="envPathText" class="font-mono"></span></p>
       <button id="retryBtn" class="bg-moss-600 hover:bg-moss-700 text-white text-sm font-medium px-4 py-2 rounded-lg">Retry</button>
     </div>
-
-    <div id="statusOk" class="hidden text-sm text-moss-700"></div>
   </div>
+
+  <div id="statusOk" class="hidden text-xs text-stone-400 mb-3"></div>
 
   <!-- MAIN APP -->
   <div id="appPanel" class="hidden">
@@ -66,7 +69,7 @@
     </div>
 
     <div class="bg-white border border-stone-200 rounded-xl shadow-sm overflow-hidden">
-      <div class="max-h-[60vh] overflow-y-auto">
+      <div class="max-h-[60vh] overflow-y-auto overscroll-y-auto">
         <table class="w-full text-sm">
           <thead class="sticky top-0 bg-stone-50 text-stone-500 text-xs uppercase tracking-wide">
             <tr>
@@ -130,13 +133,18 @@ const BARCODE_PATTERN = /^LNR(\d{3})$/i;
 
 // ---------- Connection status (reads .env via the backend) ----------
 async function checkConnection() {
+  document.getElementById('setupPanel').classList.remove('hidden');
+  document.getElementById('statusOk').classList.add('hidden');
   document.getElementById('statusChecking').classList.remove('hidden');
   document.getElementById('statusError').classList.add('hidden');
-  document.getElementById('statusOk').classList.add('hidden');
 
   try {
     const res = await fetch('/api/config-status');
     const status = await res.json();
+
+    if (status.version) {
+      document.getElementById('appVersionBadge').textContent = `v${status.version}`;
+    }
 
     if (!status.ok) {
       document.getElementById('statusChecking').classList.add('hidden');
@@ -163,6 +171,7 @@ async function checkConnection() {
       return;
     }
 
+    document.getElementById('setupPanel').classList.add('hidden');
     document.getElementById('statusOk').classList.remove('hidden');
     document.getElementById('statusOk').textContent = `Connected to ${test.data.shop.name} (${status.shop_domain}).`;
     document.getElementById('appPanel').classList.remove('hidden');
