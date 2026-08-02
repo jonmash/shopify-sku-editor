@@ -35,6 +35,7 @@ jobs:
       - name: Build LindaSKUEditor.exe
         run: >
           pyinstaller --onefile --name LindaSKUEditor
+          --icon "icon.ico"
           --add-data "static;static"
           --add-data "VERSION;."
           --collect-all uvicorn
