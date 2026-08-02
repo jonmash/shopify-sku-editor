@@ -143,7 +143,13 @@ async def config_status():
         ]
         if not val
     ]
-    return {"ok": not missing, "missing": missing, "env_path": str(ENV_PATH), "shop_domain": SHOP_DOMAIN}
+    return {
+        "ok": not missing,
+        "missing": missing,
+        "env_path": str(ENV_PATH),
+        "shop_domain": SHOP_DOMAIN,
+        "version": APP_VERSION,
+    }
 
 
 @app.post("/graphql")
@@ -318,9 +324,29 @@ async def self_update():
         f'if exist "{new_path}" start "" "{new_path}"\r\n'
     )
 
-    detached = getattr(subprocess, "DETACHED_PROCESS", 0)
+    # CREATE_NO_WINDOW (not DETACHED_PROCESS): the batch script pipes console
+    # commands together (tasklist | find), and DETACHED_PROCESS gives cmd no
+    # console at all — each piped console program then has nothing to
+    # inherit and spawns its own orphan console window instead of piping
+    # cleanly, which is exactly the stuck "find" window this was causing.
+    # CREATE_NO_WINDOW gives cmd a real console, just a hidden one, so the
+    # pipe negotiates normally. The two flags are mutually exclusive.
+    no_window = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     new_group = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-    subprocess.Popen(["cmd", "/c", str(bat_path)], creationflags=detached | new_group, close_fds=True)
+
+    startupinfo = None
+    startupinfo_cls = getattr(subprocess, "STARTUPINFO", None)
+    if startupinfo_cls is not None:
+        startupinfo = startupinfo_cls()
+        startupinfo.dwFlags |= getattr(subprocess, "STARTF_USESHOWWINDOW", 0)
+        startupinfo.wShowWindow = getattr(subprocess, "SW_HIDE", 0)
+
+    subprocess.Popen(
+        ["cmd", "/c", str(bat_path)],
+        creationflags=no_window | new_group,
+        startupinfo=startupinfo,
+        close_fds=True,
+    )
 
     def _shutdown_soon():
         time.sleep(0.5)
