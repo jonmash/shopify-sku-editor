@@ -102,15 +102,22 @@ UPDATE_GITHUB_REPO=yourname/your-repo-name
 Leave it unset and the feature stays completely off (no network calls to
 GitHub at all).
 
-**To publish a new version:**
-1. Bump the version in the `VERSION` file (e.g. `1.1.0`) and commit it.
-2. Tag and push:
-   ```
-   git tag v1.1.0
-   git push --tags
-   ```
-3. GitHub Actions builds the `.exe` and publishes it as a GitHub Release
-   automatically (see `.github/workflows/build-windows.yml`).
+**To publish a new version (from the GitHub website, no git needed):**
+1. On the repo's GitHub page, click **Releases** in the right sidebar → **Draft a new release**.
+2. Under **Tag**, click the dropdown and type a new tag in the format `v1.x.x`
+   (e.g. `v1.1.0`) → it'll offer "Create new tag: v1.x.x on publish."
+3. Make sure **main** is selected as the target branch.
+4. Give the release a name (e.g. `v1.1.0`).
+5. Click **Generate release notes** to auto-fill a changelog.
+6. Click **Publish release**.
+7. Go to the **Actions** tab and wait for the build to finish (~2 minutes)
+   — that's what actually attaches `LindaSKUEditor.exe` to the release.
+
+You don't need to manually edit the `VERSION` file — the workflow overwrites
+it automatically from whatever tag you typed, so the tag is the only place
+the version number needs to be right. If someone clicks "Update now" before
+the Actions build finishes, it'll fail with "no exe attached" — just wait
+for that run to go green first.
 
 **What the user sees:** next time the app starts, if the Release's version
 is newer than the running one, an amber banner appears with an "Update now"
@@ -122,15 +129,22 @@ takes a few seconds, no manual steps.
   shows a "Download from GitHub" link instead, since there's no single file
   to swap.
 - A running `.exe` can't overwrite itself directly on Windows, so the app
-  downloads the new version, writes a tiny batch script that waits a moment,
-  deletes the old exe, renames the new one into place, and relaunches it —
-  then the app exits so the batch script can finish the swap.
-- This mechanism was written from well-established Windows patterns but
-  **hasn't been tested on an actual Windows machine yet** — worth doing one
-  real update run yourself before relying on it unattended. If it ever
-  fails partway through, worst case is `LindaSKUEditor.exe` is missing and
-  `LindaSKUEditor.new.exe` sits next to it — just rename the `.new.exe` by
-  hand to recover.
+  downloads the new version and writes a small batch script to finish the
+  job after it exits. That script doesn't just guess a fixed delay — it
+  polls `tasklist` until the old process's PID actually disappears (a
+  PyInstaller onefile `.exe` has to unpack/clean up a temp directory on
+  exit, which can take longer than a couple of seconds, especially with
+  antivirus scanning), then retries the delete/replace step for up to 15
+  seconds in case something still has a momentary lock on the file.
+- Every step is logged to `update_log.txt` next to the exe, so if an update
+  ever fails, that file says exactly where it got stuck instead of just a
+  dead browser tab.
+- If the swap can't complete after all retries, it launches
+  `LindaSKUEditor.new.exe` directly as a fallback so the app still comes
+  back up, and logs that the old exe needs manual cleanup.
+- This was written from well-established Windows patterns but only
+  exercised locally, not on a real Windows machine yet — worth doing one
+  real update run yourself to confirm it end-to-end.
 - The update check itself (not the install) runs on every startup and fails
   silently if GitHub is unreachable — it never blocks normal use.
 
